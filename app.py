@@ -11,7 +11,7 @@ ROOT = Path(__file__).parent
 SNAPSHOTS_FILE = ROOT / "data" / "snapshots.csv"
 PORTFOLIO_FILE = ROOT / "portfolio.csv"
 
-st.set_page_config(page_title="Rental Portfolio", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="H-Square Ventures LLC", page_icon="🏠", layout="wide")
 
 st.markdown(
     """
@@ -26,7 +26,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🏠 Rental Portfolio")
+st.title("🏠 H-Square Ventures LLC")
 
 
 @st.cache_data(ttl=300)
