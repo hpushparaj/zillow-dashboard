@@ -18,7 +18,7 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).parent
-PROPERTIES_FILE = ROOT / "properties.txt"
+PORTFOLIO_FILE = ROOT / "portfolio.csv"
 SNAPSHOTS_FILE = ROOT / "data" / "snapshots.csv"
 
 RAPIDAPI_HOST = "real-estate-zillow-com.p.rapidapi.com"
@@ -45,15 +45,16 @@ FIELDS = [
 
 
 def read_properties(path: Path) -> list[tuple[str, str]]:
+    """Read zpid + label from portfolio.csv. Other columns are ignored here
+    (they're used by app.py for investment analytics)."""
     out = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [p.strip() for p in line.split(",", 1)]
-        zpid = parts[0]
-        label = parts[1] if len(parts) > 1 else zpid
-        out.append((zpid, label))
+    with path.open() as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            zpid = (row.get("zpid") or "").strip()
+            label = (row.get("label") or "").strip() or zpid
+            if zpid:
+                out.append((zpid, label))
     return out
 
 
@@ -135,7 +136,7 @@ def main() -> int:
         print("RAPIDAPI_KEY env var is not set", file=sys.stderr)
         return 1
 
-    properties = read_properties(PROPERTIES_FILE)
+    properties = read_properties(PORTFOLIO_FILE)
     if not properties:
         print("No properties to fetch", file=sys.stderr)
         return 0
