@@ -1,5 +1,6 @@
-"""Streamlit dashboard for Zillow valuations."""
+"""Streamlit dashboard: rental portfolio investment analysis."""
 
+import datetime as dt
 from pathlib import Path
 
 import pandas as pd
@@ -8,121 +9,217 @@ import streamlit as st
 
 ROOT = Path(__file__).parent
 SNAPSHOTS_FILE = ROOT / "data" / "snapshots.csv"
+PORTFOLIO_FILE = ROOT / "portfolio.csv"
 
-st.set_page_config(page_title="Home Valuations", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="Rental Portfolio", page_icon="🏠", layout="wide")
 
 st.markdown(
     """
     <style>
-    [data-testid="stMetricValue"] { font-size: 2.0rem; }
-    [data-testid="stMetricLabel"] { font-size: 0.85rem; color: #6b7280; }
-    .block-container { padding-top: 2rem; }
+    [data-testid="stMetricValue"] { font-size: 1.7rem; font-weight: 600; }
+    [data-testid="stMetricLabel"] { font-size: 0.78rem; color: #6b7280; }
+    .block-container { padding-top: 1.5rem; padding-bottom: 4rem; }
+    h1 { font-weight: 700; letter-spacing: -0.02em; }
+    h3 { margin-top: 0.2rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("🏠 Home Valuations")
+st.title("🏠 Rental Portfolio")
 
 
 @st.cache_data(ttl=300)
-def load_snapshots() -> pd.DataFrame:
-    if not SNAPSHOTS_FILE.exists():
-        return pd.DataFrame()
-    df = pd.read_csv(SNAPSHOTS_FILE, parse_dates=["fetched_at"])
-    return df.sort_values("fetched_at")
+def load_data():
+    if not SNAPSHOTS_FILE.exists() or not PORTFOLIO_FILE.exists():
+        return None, None
+    snaps = pd.read_csv(SNAPSHOTS_FILE, parse_dates=["fetched_at"])
+    portfolio = pd.read_csv(PORTFOLIO_FILE, parse_dates=["purchase_date"])
+    return snaps, portfolio
 
 
-def fmt_dollars(v) -> str:
-    return f"${v:,.0f}" if pd.notna(v) else "—"
+def fmt_dollars(v, sign=False):
+    if pd.isna(v):
+        return "—"
+    s = f"${abs(v):,.0f}"
+    return ("+" if v >= 0 else "−") + s if sign else s
 
 
-def fmt_int(v) -> str:
-    return f"{int(v):,}" if pd.notna(v) else "—"
+def fmt_pct(v, sign=True):
+    if pd.isna(v):
+        return "—"
+    return f"{v:+.2f}%" if sign else f"{v:.2f}%"
 
 
-df = load_snapshots()
+def years_held(purchase_date):
+    if pd.isna(purchase_date):
+        return None
+    return (dt.datetime.utcnow() - purchase_date).days / 365.25
 
-if df.empty:
-    st.info(
-        "No snapshots yet. Wait for the scheduled GitHub Action to commit "
-        "`data/snapshots.csv`, or run `python fetch_data.py` locally."
-    )
+
+def annualized_return(current, purchase, years):
+    if not all([current, purchase, years]) or purchase <= 0 or years <= 0:
+        return None
+    return ((current / purchase) ** (1 / years) - 1) * 100
+
+
+snaps, portfolio = load_data()
+if snaps is None or portfolio is None or snaps.empty:
+    st.info("No data yet. Wait for the scheduled GitHub Action to populate `data/snapshots.csv`.")
     st.stop()
 
-group_key = "label" if "label" in df.columns else "zpid"
-latest = df.sort_values("fetched_at").groupby(group_key).tail(1).reset_index(drop=True)
+latest_snap = snaps.sort_values("fetched_at").groupby("zpid").tail(1)
+latest = portfolio.merge(latest_snap, on="zpid", how="left", suffixes=("", "_snap"))
 
-last_update = df["fetched_at"].max()
-st.caption(f"Last refreshed: {last_update.strftime('%b %d, %Y')} · {len(latest)} properties tracked")
+# Portfolio aggregates
+total_value = latest["zestimate"].sum()
+total_basis = latest["purchase_price"].sum()
+total_appreciation = total_value - total_basis
+total_appreciation_pct = (total_appreciation / total_basis * 100) if total_basis else 0
+total_monthly_rent = latest["actual_rent"].sum()
+total_annual_rent = total_monthly_rent * 12
+blended_yield = (total_annual_rent / total_value * 100) if total_value else 0
 
-# Per-property cards
-for _, prop in latest.iterrows():
-    history = df[df[group_key] == prop[group_key]].sort_values("fetched_at")
-    zest = prop.get("zestimate")
-    rent = prop.get("rent_zestimate")
-    sqft = prop.get("living_area")
-    sold = prop.get("last_sold_price")
+# Weighted-average annualized return (by cost basis)
+years_arr = latest["purchase_date"].apply(years_held)
+basis_years = (years_arr * latest["purchase_price"]).sum()
+avg_years = basis_years / total_basis if total_basis else None
+portfolio_annualized = annualized_return(total_value, total_basis, avg_years) if avg_years else None
 
-    # Delta vs previous snapshot
-    delta_str = None
-    if len(history) >= 2 and pd.notna(zest):
-        prev = history.iloc[-2].get("zestimate")
-        if pd.notna(prev) and prev != 0:
-            change = zest - prev
-            pct = change / prev * 100
-            delta_str = f"{change:+,.0f} ({pct:+.2f}%)"
+st.caption(
+    f"Last refreshed: {snaps['fetched_at'].max().strftime('%b %d, %Y')}  ·  "
+    f"{len(latest)} properties tracked"
+)
 
-    with st.container(border=True):
-        st.markdown(f"### {prop[group_key]}")
-        addr = prop.get("address")
-        if pd.notna(addr):
-            st.caption(addr)
+# --- Portfolio summary ---
+with st.container(border=True):
+    st.markdown("#### Portfolio summary")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total value", fmt_dollars(total_value))
+    c2.metric("Cost basis", fmt_dollars(total_basis))
+    c3.metric(
+        "Appreciation",
+        fmt_dollars(total_appreciation, sign=True),
+        delta=fmt_pct(total_appreciation_pct),
+    )
+    c4.metric(
+        "Annualized return",
+        fmt_pct(portfolio_annualized) if portfolio_annualized is not None else "—",
+        help=f"Weighted by cost basis, avg hold {avg_years:.1f} yrs" if avg_years else None,
+    )
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Zestimate", fmt_dollars(zest), delta=delta_str)
-        c2.metric("Rent Zestimate", f"{fmt_dollars(rent)}/mo" if pd.notna(rent) else "—")
-
-        if pd.notna(zest) and pd.notna(rent):
-            yield_pct = rent * 12 / zest * 100
-            c3.metric("Gross yield", f"{yield_pct:.2f}%")
-        else:
-            c3.metric("Gross yield", "—")
-
-        if pd.notna(zest) and pd.notna(sold) and sold > 0:
-            appreciation = (zest - sold) / sold * 100
-            c4.metric("Vs last sold", f"{appreciation:+.1f}%", delta=fmt_dollars(zest - sold))
-        else:
-            c4.metric("Vs last sold", "—")
-
-        c5, c6, c7, c8 = st.columns(4)
-        beds = prop.get("bedrooms")
-        baths = prop.get("bathrooms")
-        c5.metric("Bedrooms", fmt_int(beds))
-        c6.metric("Bathrooms", f"{baths:g}" if pd.notna(baths) else "—")
-        c7.metric("Living area", f"{fmt_int(sqft)} sqft" if pd.notna(sqft) else "—")
-        if pd.notna(zest) and pd.notna(sqft) and sqft > 0:
-            c8.metric("$ / sqft", fmt_dollars(zest / sqft))
-        else:
-            c8.metric("$ / sqft", "—")
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Monthly rent", fmt_dollars(total_monthly_rent))
+    c6.metric("Annual rent", fmt_dollars(total_annual_rent))
+    c7.metric("Blended gross yield", fmt_pct(blended_yield, sign=False))
+    c8.metric("Properties", str(len(latest)))
 
 st.divider()
 
-# History chart
-st.subheader("Valuation history")
+# --- Per-property cards ---
+st.markdown("#### Properties")
+for _, p in latest.iterrows():
+    yrs = years_held(p["purchase_date"])
+    cur = p.get("zestimate")
+    cost = p.get("purchase_price")
+    appreciation = (cur - cost) if pd.notna(cur) and pd.notna(cost) else None
+    appreciation_pct = (appreciation / cost * 100) if appreciation is not None and cost else None
+    annual_ret = annualized_return(cur, cost, yrs)
+    annual_income = p["actual_rent"] * 12 if pd.notna(p.get("actual_rent")) else None
+    gross_yield = (annual_income / cur * 100) if annual_income and pd.notna(cur) and cur else None
+    market_rent = p.get("rent_zestimate")
+    rent_vs_market = None
+    if pd.notna(p.get("actual_rent")) and pd.notna(market_rent) and market_rent:
+        rent_vs_market = (p["actual_rent"] - market_rent) / market_rent * 100
 
-hist = df.dropna(subset=["zestimate"]).copy()
-fig = px.line(
-    hist,
-    x="fetched_at",
-    y="zestimate",
-    color=group_key,
-    markers=True,
-    labels={"fetched_at": "", "zestimate": "Zestimate"},
+    with st.container(border=True):
+        header_cols = st.columns([3, 1])
+        with header_cols[0]:
+            st.markdown(f"### {p['label']}")
+            addr = p.get("address")
+            if pd.notna(addr):
+                st.caption(addr)
+        with header_cols[1]:
+            if pd.notna(p["purchase_date"]):
+                st.caption(
+                    f"Bought {p['purchase_date'].strftime('%b %Y')}  ·  "
+                    f"Held {yrs:.1f} yrs" if yrs else ""
+                )
+
+        # Financial row
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("Current value", fmt_dollars(cur))
+        f2.metric("Purchase price", fmt_dollars(cost))
+        f3.metric(
+            "Appreciation",
+            fmt_dollars(appreciation, sign=True) if appreciation is not None else "—",
+            delta=fmt_pct(appreciation_pct) if appreciation_pct is not None else None,
+        )
+        f4.metric(
+            "Annualized return",
+            fmt_pct(annual_ret) if annual_ret is not None else "—",
+        )
+
+        # Rental row
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric(
+            "Actual rent",
+            f"{fmt_dollars(p['actual_rent'])}/mo" if pd.notna(p.get("actual_rent")) else "—",
+        )
+        r2.metric(
+            "Market rent",
+            f"{fmt_dollars(market_rent)}/mo" if pd.notna(market_rent) else "—",
+            delta=f"{rent_vs_market:+.1f}% vs market" if rent_vs_market is not None else None,
+        )
+        r3.metric("Annual income", fmt_dollars(annual_income) if annual_income else "—")
+        r4.metric(
+            "Gross yield",
+            fmt_pct(gross_yield, sign=False) if gross_yield is not None else "—",
+        )
+
+st.divider()
+
+# --- Time series ---
+st.subheader("Portfolio value over time")
+# Collapse to one snapshot per property per day (latest of the day)
+chart_df = (
+    snaps.dropna(subset=["zestimate"])
+    .assign(date=lambda d: d["fetched_at"].dt.normalize())
+    .sort_values("fetched_at")
+    .groupby(["date", "zpid"], as_index=False)
+    .tail(1)
+    .drop(columns=["label"], errors="ignore")
+    .merge(portfolio[["zpid", "label"]], on="zpid", how="left")
 )
-fig.update_traces(line=dict(width=2.5), marker=dict(size=8))
+chart_df["label"] = chart_df["label"].fillna(chart_df["zpid"].astype(str))
+
+# Forward-fill missing property values per date so the Total line is continuous
+pivot = (
+    chart_df.pivot_table(index="date", columns="label", values="zestimate", aggfunc="last")
+    .sort_index()
+    .ffill()
+)
+totals = pivot.sum(axis=1, min_count=len(portfolio)).dropna()
+
+fig = px.line(
+    chart_df,
+    x="date",
+    y="zestimate",
+    color="label",
+    markers=True,
+    labels={"date": "", "zestimate": "Value"},
+)
+fig.add_scatter(
+    x=totals.index,
+    y=totals.values,
+    mode="lines+markers",
+    name="Total portfolio",
+    line=dict(width=3, dash="dash", color="#374151"),
+)
+
+fig.update_traces(selector=dict(mode="lines+markers"), marker=dict(size=8))
 fig.update_layout(
-    height=420,
+    height=440,
     legend_title_text="",
     hovermode="x unified",
     margin=dict(l=10, r=10, t=10, b=10),
@@ -131,17 +228,17 @@ fig.update_layout(
 fig.update_xaxes(tickformat="%b %d, %Y", showgrid=False)
 fig.update_yaxes(tickformat="$,.0f", gridcolor="rgba(128,128,128,0.15)")
 
-# If history is sparse, expand y range so a single point doesn't look like a flat horizon
-if hist.groupby(group_key).size().max() <= 1:
-    lo, hi = hist["zestimate"].min(), hist["zestimate"].max()
-    pad = max(50_000, (hi - lo) * 0.5) if hi > lo else 50_000
+if chart_df.groupby("zpid").size().max() <= 1:
+    series = pd.concat([chart_df["zestimate"], totals]) if len(totals) else chart_df["zestimate"]
+    lo, hi = series.min(), series.max()
+    pad = max(50_000, (hi - lo) * 0.1) if hi > lo else 50_000
     fig.update_yaxes(range=[lo - pad, hi + pad])
 
 st.plotly_chart(fig, use_container_width=True)
 
 with st.expander("Raw snapshots"):
     st.dataframe(
-        df.sort_values("fetched_at", ascending=False),
+        snaps.sort_values("fetched_at", ascending=False),
         use_container_width=True,
         hide_index=True,
     )
