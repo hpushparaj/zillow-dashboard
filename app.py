@@ -155,84 +155,59 @@ with st.container(border=True):
     c1.metric(
         "Total value",
         fmt_dollars(total_value),
-        help="Sum of current Zestimates across all properties.",
+        delta=fmt_pct(total_appreciation_pct),
+        help=(
+            "Sum of current Zestimates. "
+            f"Delta = appreciation vs cost basis of {fmt_dollars(total_basis)}."
+        ),
     )
     c2.metric(
-        "Cost basis",
-        fmt_dollars(total_basis),
-        help="Sum of purchase prices across all properties.",
+        "Total equity",
+        fmt_dollars(total_equity) if total_equity is not None else "—",
+        help="Total value − Mortgage balance. Only counts properties with mortgage data.",
     )
     c3.metric(
-        "Appreciation",
-        fmt_dollars(total_appreciation, sign=True),
-        delta=fmt_pct(total_appreciation_pct),
-        help="Total value − Cost basis. % = Appreciation ÷ Cost basis × 100.",
+        "Monthly cash flow",
+        fmt_dollars(total_monthly_cashflow, sign=True) if pd.notna(total_monthly_cashflow) else "—",
+        help=(
+            "Sum of (Rent − Mortgage payment − HOA − Maintenance − Vacancy loss). "
+            "Property tax + insurance assumed escrowed in mortgage payment."
+        ),
     )
     c4.metric(
         "Annualized return",
         fmt_pct(portfolio_annualized) if portfolio_annualized is not None else "—",
         help=(
-            "Compound annual growth rate (CAGR): "
-            "((Total value ÷ Cost basis)^(1 ÷ avg years held) − 1) × 100.  "
-            f"Avg hold weighted by basis: {avg_years:.1f} years."
-        ) if avg_years else "CAGR weighted by cost basis.",
+            "CAGR weighted by cost basis: "
+            "((Value ÷ Basis)^(1/avg years) − 1) × 100. "
+            f"Avg hold: {avg_years:.1f} yrs." if avg_years else "CAGR weighted by basis."
+        ),
     )
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric(
-        "Monthly rent",
-        fmt_dollars(total_monthly_rent),
-        help="Sum of actual monthly rents (from portfolio.csv) across all properties.",
-    )
-    c6.metric(
-        "Annual rent",
-        fmt_dollars(total_annual_rent),
-        help="Monthly rent × 12.",
-    )
-    c7.metric(
-        "Blended gross yield",
-        fmt_pct(blended_yield, sign=False),
-        help="Annual rent ÷ Total value × 100. Pre-expense (no mortgage, taxes, or maintenance subtracted).",
-    )
-    c8.metric("Properties", str(len(latest)))
+    with st.expander("More details"):
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Cost basis", fmt_dollars(total_basis), help="Sum of purchase prices.")
+        d2.metric("Total debt", fmt_dollars(total_debt) if pd.notna(total_debt) else "—", help="Sum of current mortgage balances.")
+        d3.metric(
+            "Portfolio LTV",
+            fmt_pct(total_debt / total_value * 100, sign=False) if total_value and pd.notna(total_debt) else "—",
+            help="Total debt ÷ Total value × 100.",
+        )
+        d4.metric("Properties", str(len(latest)))
 
-    if total_equity is not None or pd.notna(total_monthly_cashflow):
-        c9, c10, c11, c12 = st.columns(4)
-        c9.metric(
-            "Total equity",
-            fmt_dollars(total_equity) if total_equity is not None else "—",
-            help="Total value − Total mortgage balance. Only counts properties with mortgage data in portfolio.csv.",
+        d5, d6, d7, d8 = st.columns(4)
+        d5.metric("Monthly rent", fmt_dollars(total_monthly_rent))
+        d6.metric("Annual rent", fmt_dollars(total_annual_rent))
+        d7.metric(
+            "Blended gross yield",
+            fmt_pct(blended_yield, sign=False),
+            help="Annual rent ÷ Total value × 100. Pre-expense.",
         )
-        c10.metric(
-            "Total debt",
-            fmt_dollars(total_debt) if pd.notna(total_debt) else "—",
-            help="Sum of current mortgage balances.",
+        d8.metric(
+            "Blended cap rate",
+            fmt_pct(blended_cap_rate, sign=False) if pd.notna(blended_cap_rate) else "—",
+            help="NOI ÷ Value × 100. Unlevered. Only includes properties with full expense data.",
         )
-        c11.metric(
-            "Monthly cash flow",
-            fmt_dollars(total_monthly_cashflow, sign=True) if pd.notna(total_monthly_cashflow) else "—",
-            help=(
-                "Sum of (Rent − Mortgage payment − HOA − Maintenance reserve − Vacancy loss) "
-                "across properties with mortgage data. "
-                "Property tax + insurance assumed to be in mortgage payment via escrow."
-            ),
-        )
-        if pd.notna(blended_cap_rate):
-            c12.metric(
-                "Blended cap rate",
-                fmt_pct(blended_cap_rate, sign=False),
-                help=(
-                    "NOI ÷ Current value × 100, summed across properties with full expense data. "
-                    "NOI = Annual rent − Property tax − Insurance − HOA − Maintenance. "
-                    "Unlevered: excludes mortgage."
-                ),
-            )
-        elif total_value and pd.notna(total_debt):
-            c12.metric(
-                "Portfolio LTV",
-                fmt_pct(total_debt / total_value * 100, sign=False),
-                help="Total debt ÷ Total value × 100.",
-            )
 
 st.divider()
 
@@ -252,6 +227,22 @@ for _, p in latest.iterrows():
     if pd.notna(p.get("actual_rent")) and pd.notna(market_rent) and market_rent:
         rent_vs_market = (p["actual_rent"] - market_rent) / market_rent * 100
 
+    # Pre-compute mortgage / returns metrics for use in headline + details
+    m_balance = p.get("mortgage_balance")
+    m_payment = p.get("mortgage_payment")
+    m_rate = p.get("mortgage_rate")
+    equity = cur - m_balance if pd.notna(cur) and pd.notna(m_balance) else None
+    ltv = m_balance / cur * 100 if pd.notna(cur) and pd.notna(m_balance) and cur else None
+    cash_flow = p.get("_cash_flow")
+    annual_cash_flow = cash_flow * 12 if pd.notna(cash_flow) else None
+    cash_flow_pct = (cash_flow / p["actual_rent"] * 100) if pd.notna(cash_flow) and pd.notna(p.get("actual_rent")) and p["actual_rent"] else None
+    noi = p.get("_noi")
+    cap_rate = (noi / cur * 100) if pd.notna(noi) and pd.notna(cur) and cur else None
+    down_pmt = p.get("down_payment")
+    closing = p.get("closing_costs")
+    cash_invested = (down_pmt or 0) + (closing or 0) if pd.notna(down_pmt) or pd.notna(closing) else None
+    coc_return = (annual_cash_flow / cash_invested * 100) if annual_cash_flow is not None and cash_invested else None
+
     with st.container(border=True):
         header_cols = st.columns([3, 1])
         with header_cols[0]:
@@ -266,143 +257,119 @@ for _, p in latest.iterrows():
                     f"Held {yrs:.1f} yrs" if yrs else ""
                 )
 
-        # Financial row
-        f1, f2, f3, f4 = st.columns(4)
-        f1.metric(
+        # Headline row — 4 vital signs
+        h1, h2, h3, h4 = st.columns(4)
+        h1.metric(
             "Current value",
             fmt_dollars(cur),
-            help="Latest Zillow Zestimate from data/snapshots.csv.",
-        )
-        f2.metric(
-            "Purchase price",
-            fmt_dollars(cost),
-            help="From portfolio.csv. Hover the caption above for purchase date and hold time.",
-        )
-        f3.metric(
-            "Appreciation",
-            fmt_dollars(appreciation, sign=True) if appreciation is not None else "—",
             delta=fmt_pct(appreciation_pct) if appreciation_pct is not None else None,
-            help="Current value − Purchase price. % = Appreciation ÷ Purchase price × 100.",
+            help=(
+                "Latest Zillow Zestimate. "
+                f"Delta = appreciation vs purchase price of {fmt_dollars(cost)}."
+            ),
         )
-        f4.metric(
+        h2.metric(
+            "Cash flow",
+            f"{fmt_dollars(cash_flow, sign=True)}/mo" if pd.notna(cash_flow) else "—",
+            delta=fmt_pct(cash_flow_pct) if pd.notna(cash_flow_pct) else None,
+            help=(
+                "Rent − Mortgage payment − HOA − Maintenance reserve − Vacancy loss. "
+                "Delta = Cash flow ÷ Rent × 100. "
+                "Shows '—' if mortgage data isn't in portfolio.csv."
+            ),
+        )
+        h3.metric(
             "Annualized return",
             fmt_pct(annual_ret) if annual_ret is not None else "—",
             help=(
-                "Compound annual growth rate (CAGR): "
+                "Compound annual growth rate (CAGR) on property value: "
                 "((Current value ÷ Purchase price)^(1 ÷ years held) − 1) × 100."
-                + (f"  Years held: {yrs:.2f}." if yrs else "")
+                + (f" Held {yrs:.1f} yrs." if yrs else "")
             ),
         )
-
-        # Rental row
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric(
-            "Actual rent",
-            f"{fmt_dollars(p['actual_rent'])}/mo" if pd.notna(p.get("actual_rent")) else "—",
-            help="Current monthly rent collected (from portfolio.csv).",
-        )
-        r2.metric(
-            "Market rent",
-            f"{fmt_dollars(market_rent)}/mo" if pd.notna(market_rent) else "—",
-            delta=f"{rent_vs_market:+.1f}% vs market" if rent_vs_market is not None else None,
-            help=(
-                "Zillow's Rent Zestimate (estimated market rent). "
-                "Delta = (Actual rent − Market rent) ÷ Market rent × 100. "
-                "Negative means you're charging below market."
-            ),
-        )
-        r3.metric(
-            "Annual income",
-            fmt_dollars(annual_income) if annual_income else "—",
-            help="Actual monthly rent × 12. Gross income, before expenses or vacancy.",
-        )
-        r4.metric(
-            "Gross yield",
-            fmt_pct(gross_yield, sign=False) if gross_yield is not None else "—",
-            help="Annual income ÷ Current value × 100. Pre-expense yield.",
-        )
-
-        # Mortgage / returns rows — only show if mortgage data is present
-        m_balance = p.get("mortgage_balance")
-        m_payment = p.get("mortgage_payment")
-        if pd.notna(m_balance) or pd.notna(m_payment):
-            m_rate = p.get("mortgage_rate")
-            equity = cur - m_balance if pd.notna(cur) and pd.notna(m_balance) else None
-            ltv = m_balance / cur * 100 if pd.notna(cur) and pd.notna(m_balance) and cur else None
-            cash_flow = p["_cash_flow"]
-            annual_cash_flow = cash_flow * 12 if pd.notna(cash_flow) else None
-            cash_flow_pct = (cash_flow / p["actual_rent"] * 100) if pd.notna(cash_flow) and pd.notna(p.get("actual_rent")) and p["actual_rent"] else None
-            noi = p["_noi"]
-            cap_rate = (noi / cur * 100) if pd.notna(noi) and pd.notna(cur) and cur else None
-            down_pmt = p.get("down_payment")
-            closing = p.get("closing_costs")
-            cash_invested = None
-            if pd.notna(down_pmt) or pd.notna(closing):
-                cash_invested = (down_pmt or 0) + (closing or 0)
-            coc_return = (annual_cash_flow / cash_invested * 100) if annual_cash_flow is not None and cash_invested else None
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric(
-                "Equity",
-                fmt_dollars(equity) if equity is not None else "—",
-                help="Current value − Mortgage balance.",
-            )
-            m2.metric(
-                "LTV",
-                fmt_pct(ltv, sign=False) if ltv is not None else "—",
-                help="Loan-to-value: Mortgage balance ÷ Current value × 100.",
-            )
-            m3.metric(
-                "Mortgage payment",
-                f"{fmt_dollars(m_payment)}/mo" if pd.notna(m_payment) else "—",
+        # 4th headline: cap rate if available, else gross yield as fallback
+        if pd.notna(cap_rate):
+            h4.metric(
+                "Cap rate",
+                fmt_pct(cap_rate, sign=False),
                 help=(
-                    f"Total monthly payment to lender (P&I + escrow for tax/insurance) at {m_rate:.3f}% interest."
-                    if pd.notna(m_rate) else "Total monthly payment to lender."
+                    "Unlevered yield. NOI ÷ Current value × 100. "
+                    "NOI = Annual rent − Tax − Insurance − HOA − Maintenance − Vacancy loss. "
+                    "Excludes mortgage. The real-estate industry's 'P/E' metric."
                 ),
             )
-            m4.metric(
-                "Cash flow",
-                f"{fmt_dollars(cash_flow, sign=True)}/mo" if pd.notna(cash_flow) else "—",
-                delta=fmt_pct(cash_flow_pct) if pd.notna(cash_flow_pct) else None,
+        else:
+            h4.metric(
+                "Gross yield",
+                fmt_pct(gross_yield, sign=False) if gross_yield is not None else "—",
                 help=(
-                    "Rent − Mortgage payment − HOA − Maintenance reserve − Vacancy loss. "
-                    "Assumes property tax + insurance are escrowed in mortgage payment. "
-                    "Maintenance reserve = Current value × maintenance_pct ÷ 12. "
-                    "Delta = Cash flow ÷ Rent × 100."
+                    "Annual rent ÷ Current value × 100. Pre-expense. "
+                    "Add property tax + insurance to portfolio.csv to upgrade to true cap rate."
                 ),
             )
 
-            # Returns row — show if cap rate or cash-on-cash computable
-            if pd.notna(cap_rate) or pd.notna(coc_return) or pd.notna(annual_cash_flow):
-                n1, n2, n3, n4 = st.columns(4)
-                n1.metric(
-                    "Cap rate",
-                    fmt_pct(cap_rate, sign=False) if pd.notna(cap_rate) else "—",
-                    help=(
-                        "Unlevered yield. NOI ÷ Current value × 100. "
-                        "NOI = Annual rent − Property tax − Insurance − HOA − Maintenance reserve − Vacancy loss. "
-                        "Excludes mortgage."
-                    ),
+        # Details expander — everything else
+        with st.expander("More details"):
+            st.markdown("**Financials**")
+            f1, f2, f3, f4 = st.columns(4)
+            f1.metric("Purchase price", fmt_dollars(cost))
+            f2.metric(
+                "Appreciation",
+                fmt_dollars(appreciation, sign=True) if appreciation is not None else "—",
+                delta=fmt_pct(appreciation_pct) if appreciation_pct is not None else None,
+            )
+            f3.metric("Annual income", fmt_dollars(annual_income) if annual_income else "—")
+            f4.metric("Annual cash flow", fmt_dollars(annual_cash_flow, sign=True) if pd.notna(annual_cash_flow) else "—")
+
+            st.markdown("**Rental**")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric(
+                "Actual rent",
+                f"{fmt_dollars(p['actual_rent'])}/mo" if pd.notna(p.get("actual_rent")) else "—",
+            )
+            r2.metric(
+                "Market rent",
+                f"{fmt_dollars(market_rent)}/mo" if pd.notna(market_rent) else "—",
+                delta=f"{rent_vs_market:+.1f}% vs market" if rent_vs_market is not None else None,
+            )
+            r3.metric("Gross yield", fmt_pct(gross_yield, sign=False) if gross_yield is not None else "—")
+            beds = p.get("bedrooms")
+            baths = p.get("bathrooms")
+            sqft = p.get("living_area")
+            details_str = ""
+            if pd.notna(beds): details_str += f"{int(beds)} bd"
+            if pd.notna(baths): details_str += f" / {baths:g} ba"
+            if pd.notna(sqft): details_str += f" / {int(sqft):,} sqft"
+            r4.metric("Property", details_str.strip(" /") or "—")
+
+            if pd.notna(m_balance) or pd.notna(m_payment):
+                st.markdown("**Financing**")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Equity", fmt_dollars(equity) if equity is not None else "—")
+                m2.metric("LTV", fmt_pct(ltv, sign=False) if ltv is not None else "—")
+                m3.metric(
+                    "Mortgage payment",
+                    f"{fmt_dollars(m_payment)}/mo" if pd.notna(m_payment) else "—",
+                    help=f"At {m_rate:.3f}% interest." if pd.notna(m_rate) else None,
                 )
-                n2.metric(
-                    "Cash-on-cash",
-                    fmt_pct(coc_return) if pd.notna(coc_return) else "—",
-                    help=(
-                        "Annual cash flow ÷ Cash invested × 100. "
-                        "Cash invested = Down payment + Closing costs. "
-                        "Levered return on the actual cash you put in."
-                    ),
-                )
-                n3.metric(
-                    "Annual cash flow",
-                    fmt_dollars(annual_cash_flow, sign=True) if pd.notna(annual_cash_flow) else "—",
-                    help="Monthly cash flow × 12.",
-                )
-                n4.metric(
-                    "Cash invested",
-                    fmt_dollars(cash_invested) if cash_invested is not None else "—",
-                    help="Down payment + Closing costs at purchase.",
-                )
+                m4.metric("Mortgage balance", fmt_dollars(m_balance) if pd.notna(m_balance) else "—")
+
+                if pd.notna(coc_return) or cash_invested is not None:
+                    n1, n2, n3, n4 = st.columns(4)
+                    n1.metric(
+                        "Cash-on-cash",
+                        fmt_pct(coc_return) if pd.notna(coc_return) else "—",
+                        help="Annual cash flow ÷ Cash invested × 100.",
+                    )
+                    n2.metric("Cash invested", fmt_dollars(cash_invested) if cash_invested is not None else "—")
+                    n3.metric(
+                        "Property tax (yr)",
+                        fmt_dollars(p.get("property_tax_annual")) if pd.notna(p.get("property_tax_annual")) else "—",
+                    )
+                    n4.metric(
+                        "Insurance (yr)",
+                        fmt_dollars(p.get("insurance_annual")) if pd.notna(p.get("insurance_annual")) else "—",
+                    )
 
 st.divider()
 
