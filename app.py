@@ -29,6 +29,25 @@ st.markdown(
 st.title("🏠 H-Square Ventures LLC")
 
 
+def check_password():
+    if st.session_state.get("authenticated"):
+        return
+    expected = st.secrets.get("APP_PASSWORD")
+    if not expected:
+        st.error("APP_PASSWORD secret is not set. Configure it in the app's secrets.")
+        st.stop()
+    pw = st.text_input("Password", type="password")
+    if pw == expected:
+        st.session_state.authenticated = True
+        st.rerun()
+    elif pw:
+        st.error("Wrong password.")
+    st.stop()
+
+
+check_password()
+
+
 @st.cache_data(ttl=300)
 def load_data():
     if not SNAPSHOTS_FILE.exists() or not PORTFOLIO_FILE.exists():
