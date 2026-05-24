@@ -2,8 +2,8 @@ name: Fetch valuations
 
 on:
   schedule:
-    # Daily at 14:00 UTC (~7am PT). Adjust as you like.
-    - cron: "0 14 * * *"
+    # Every other day at 14:00 UTC (~7am PT) — ~15 runs/month × 4 props = ~60 reqs/month.
+    - cron: "0 14 */2 * *"
   workflow_dispatch:
 
 permissions:
