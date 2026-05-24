@@ -114,23 +114,48 @@ st.caption(
 with st.container(border=True):
     st.markdown("#### Portfolio summary")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total value", fmt_dollars(total_value))
-    c2.metric("Cost basis", fmt_dollars(total_basis))
+    c1.metric(
+        "Total value",
+        fmt_dollars(total_value),
+        help="Sum of current Zestimates across all properties.",
+    )
+    c2.metric(
+        "Cost basis",
+        fmt_dollars(total_basis),
+        help="Sum of purchase prices across all properties.",
+    )
     c3.metric(
         "Appreciation",
         fmt_dollars(total_appreciation, sign=True),
         delta=fmt_pct(total_appreciation_pct),
+        help="Total value − Cost basis. % = Appreciation ÷ Cost basis × 100.",
     )
     c4.metric(
         "Annualized return",
         fmt_pct(portfolio_annualized) if portfolio_annualized is not None else "—",
-        help=f"Weighted by cost basis, avg hold {avg_years:.1f} yrs" if avg_years else None,
+        help=(
+            "Compound annual growth rate (CAGR): "
+            "((Total value ÷ Cost basis)^(1 ÷ avg years held) − 1) × 100.  "
+            f"Avg hold weighted by basis: {avg_years:.1f} years."
+        ) if avg_years else "CAGR weighted by cost basis.",
     )
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Monthly rent", fmt_dollars(total_monthly_rent))
-    c6.metric("Annual rent", fmt_dollars(total_annual_rent))
-    c7.metric("Blended gross yield", fmt_pct(blended_yield, sign=False))
+    c5.metric(
+        "Monthly rent",
+        fmt_dollars(total_monthly_rent),
+        help="Sum of actual monthly rents (from portfolio.csv) across all properties.",
+    )
+    c6.metric(
+        "Annual rent",
+        fmt_dollars(total_annual_rent),
+        help="Monthly rent × 12.",
+    )
+    c7.metric(
+        "Blended gross yield",
+        fmt_pct(blended_yield, sign=False),
+        help="Annual rent ÷ Total value × 100. Pre-expense (no mortgage, taxes, or maintenance subtracted).",
+    )
     c8.metric("Properties", str(len(latest)))
 
 st.divider()
@@ -167,16 +192,30 @@ for _, p in latest.iterrows():
 
         # Financial row
         f1, f2, f3, f4 = st.columns(4)
-        f1.metric("Current value", fmt_dollars(cur))
-        f2.metric("Purchase price", fmt_dollars(cost))
+        f1.metric(
+            "Current value",
+            fmt_dollars(cur),
+            help="Latest Zillow Zestimate from data/snapshots.csv.",
+        )
+        f2.metric(
+            "Purchase price",
+            fmt_dollars(cost),
+            help="From portfolio.csv. Hover the caption above for purchase date and hold time.",
+        )
         f3.metric(
             "Appreciation",
             fmt_dollars(appreciation, sign=True) if appreciation is not None else "—",
             delta=fmt_pct(appreciation_pct) if appreciation_pct is not None else None,
+            help="Current value − Purchase price. % = Appreciation ÷ Purchase price × 100.",
         )
         f4.metric(
             "Annualized return",
             fmt_pct(annual_ret) if annual_ret is not None else "—",
+            help=(
+                "Compound annual growth rate (CAGR): "
+                "((Current value ÷ Purchase price)^(1 ÷ years held) − 1) × 100."
+                + (f"  Years held: {yrs:.2f}." if yrs else "")
+            ),
         )
 
         # Rental row
@@ -184,16 +223,27 @@ for _, p in latest.iterrows():
         r1.metric(
             "Actual rent",
             f"{fmt_dollars(p['actual_rent'])}/mo" if pd.notna(p.get("actual_rent")) else "—",
+            help="Current monthly rent collected (from portfolio.csv).",
         )
         r2.metric(
             "Market rent",
             f"{fmt_dollars(market_rent)}/mo" if pd.notna(market_rent) else "—",
             delta=f"{rent_vs_market:+.1f}% vs market" if rent_vs_market is not None else None,
+            help=(
+                "Zillow's Rent Zestimate (estimated market rent). "
+                "Delta = (Actual rent − Market rent) ÷ Market rent × 100. "
+                "Negative means you're charging below market."
+            ),
         )
-        r3.metric("Annual income", fmt_dollars(annual_income) if annual_income else "—")
+        r3.metric(
+            "Annual income",
+            fmt_dollars(annual_income) if annual_income else "—",
+            help="Actual monthly rent × 12. Gross income, before expenses or vacancy.",
+        )
         r4.metric(
             "Gross yield",
             fmt_pct(gross_yield, sign=False) if gross_yield is not None else "—",
+            help="Annual income ÷ Current value × 100. Pre-expense yield.",
         )
 
 st.divider()
