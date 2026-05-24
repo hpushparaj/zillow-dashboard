@@ -1,5 +1,5 @@
-zpid,label,purchase_price,purchase_date,actual_rent
-54770934,558 Marble Arch,920000,2018-04-01,4100
-97999338,4465 Ambassador Way,426000,2025-01-21,2730
-58606207,1554 Hayden Mill,371500,2022-02-23,2425
-14827461,3290 Northcliff,445000,2024-02-26,2640
+zpid,label,purchase_price,purchase_date,actual_rent,mortgage_balance,mortgage_payment,mortgage_rate,additional_monthly_cost
+54770934,558 Marble Arch,920000,2018-04-01,4100,,,,
+97999338,4465 Ambassador Way,426000,2025-01-21,2730,,,,
+58606207,1554 Hayden Mill,371500,2022-02-23,2425,,,,
+14827461,3290 Northcliff,445000,2024-02-26,2640,260433.30,2276.40,6.625,0

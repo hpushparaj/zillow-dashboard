@@ -99,6 +99,15 @@ total_monthly_rent = latest["actual_rent"].sum()
 total_annual_rent = total_monthly_rent * 12
 blended_yield = (total_annual_rent / total_value * 100) if total_value else 0
 
+total_debt = latest.get("mortgage_balance", pd.Series(dtype=float)).sum(min_count=1)
+total_equity = (total_value - total_debt) if pd.notna(total_debt) else None
+total_mortgage_payment = latest.get("mortgage_payment", pd.Series(dtype=float)).sum(min_count=1)
+total_addl_cost = latest.get("additional_monthly_cost", pd.Series(dtype=float)).fillna(0).sum()
+total_monthly_cashflow = (
+    total_monthly_rent - (total_mortgage_payment or 0) - total_addl_cost
+    if pd.notna(total_mortgage_payment) else None
+)
+
 # Weighted-average annualized return (by cost basis)
 years_arr = latest["purchase_date"].apply(years_held)
 basis_years = (years_arr * latest["purchase_price"]).sum()
@@ -157,6 +166,30 @@ with st.container(border=True):
         help="Annual rent ÷ Total value × 100. Pre-expense (no mortgage, taxes, or maintenance subtracted).",
     )
     c8.metric("Properties", str(len(latest)))
+
+    if total_equity is not None or total_monthly_cashflow is not None:
+        c9, c10, c11, c12 = st.columns(4)
+        c9.metric(
+            "Total equity",
+            fmt_dollars(total_equity) if total_equity is not None else "—",
+            help="Total value − Total mortgage balance. Only counts properties with mortgage data in portfolio.csv.",
+        )
+        c10.metric(
+            "Total debt",
+            fmt_dollars(total_debt) if pd.notna(total_debt) else "—",
+            help="Sum of current mortgage balances.",
+        )
+        c11.metric(
+            "Monthly cash flow",
+            fmt_dollars(total_monthly_cashflow, sign=True) if total_monthly_cashflow is not None else "—",
+            help="Sum of (Rent − Mortgage payment − Additional monthly costs) across properties with mortgage data. Pre-tax/vacancy/maintenance.",
+        )
+        if total_value and pd.notna(total_debt):
+            c12.metric(
+                "Portfolio LTV",
+                fmt_pct(total_debt / total_value * 100, sign=False),
+                help="Total debt ÷ Total value × 100.",
+            )
 
 st.divider()
 
@@ -245,6 +278,51 @@ for _, p in latest.iterrows():
             fmt_pct(gross_yield, sign=False) if gross_yield is not None else "—",
             help="Annual income ÷ Current value × 100. Pre-expense yield.",
         )
+
+        # Mortgage row — only show if data is present
+        m_balance = p.get("mortgage_balance")
+        m_payment = p.get("mortgage_payment")
+        if pd.notna(m_balance) or pd.notna(m_payment):
+            m_rate = p.get("mortgage_rate")
+            addl = p.get("additional_monthly_cost") or 0
+            equity = cur - m_balance if pd.notna(cur) and pd.notna(m_balance) else None
+            ltv = m_balance / cur * 100 if pd.notna(cur) and pd.notna(m_balance) and cur else None
+            cashflow = (
+                p["actual_rent"] - (m_payment or 0) - (addl or 0)
+                if pd.notna(p.get("actual_rent")) and pd.notna(m_payment)
+                else None
+            )
+            cashflow_pct = (cashflow / p["actual_rent"] * 100) if cashflow is not None and pd.notna(p.get("actual_rent")) and p["actual_rent"] else None
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric(
+                "Equity",
+                fmt_dollars(equity) if equity is not None else "—",
+                help="Current value − Mortgage balance.",
+            )
+            m2.metric(
+                "LTV",
+                fmt_pct(ltv, sign=False) if ltv is not None else "—",
+                help="Loan-to-value: Mortgage balance ÷ Current value × 100.",
+            )
+            m3.metric(
+                "Mortgage P&I",
+                f"{fmt_dollars(m_payment)}/mo" if pd.notna(m_payment) else "—",
+                help=(
+                    f"Monthly mortgage payment at {m_rate:.3f}% interest."
+                    if pd.notna(m_rate) else "Monthly mortgage payment."
+                ),
+            )
+            m4.metric(
+                "Cash flow",
+                f"{fmt_dollars(cashflow, sign=True)}/mo" if cashflow is not None else "—",
+                delta=fmt_pct(cashflow_pct) if cashflow_pct is not None else None,
+                help=(
+                    "Actual rent − Mortgage payment − Additional monthly cost. "
+                    "Before property tax, insurance, vacancy, and maintenance reserves "
+                    "(unless those are escrowed in the mortgage payment)."
+                ),
+            )
 
 st.divider()
 
