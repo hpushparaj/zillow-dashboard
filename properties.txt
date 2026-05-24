@@ -1,0 +1,6 @@
+# One property per line, format: ZPID,label
+# Label is optional. ZPID is the number before "_zpid" in a Zillow URL.
+# Example URL: https://www.zillow.com/homedetails/123-Main-St-City-CA/54770934_zpid/
+#                                                                     ^^^^^^^^
+# Lines starting with # are ignored.
+54770934,My property
