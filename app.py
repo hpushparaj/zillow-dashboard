@@ -443,7 +443,12 @@ for _, p in latest.iterrows():
                 # Operating costs row
                 st.markdown("**Operating costs (annual)**")
                 hoa_yr = (p.get("hoa_monthly") or 0) * 12
-                o1, o2, o3, _ = st.columns(4)
+                maint_pct_val = p.get("maintenance_pct") if pd.notna(p.get("maintenance_pct")) else 1.0
+                maint_yr = (cur or 0) * maint_pct_val / 100 if pd.notna(cur) else None
+                vac_pct_val = p.get("vacancy_pct") or 0
+                vac_yr = (p.get("actual_rent") or 0) * 12 * vac_pct_val / 100 if pd.notna(p.get("actual_rent")) else None
+
+                o1, o2, o3, o4, o5 = st.columns(5)
                 o1.metric(
                     "Property tax",
                     fmt_dollars(p.get("property_tax_annual")) if pd.notna(p.get("property_tax_annual")) else "—",
@@ -458,6 +463,30 @@ for _, p in latest.iterrows():
                     "HOA",
                     fmt_dollars(hoa_yr) if hoa_yr else "—",
                     help="Annual HOA dues (monthly × 12). Usually paid separately, not through escrow.",
+                )
+                o4.metric(
+                    "Maintenance reserve",
+                    fmt_dollars(maint_yr) if maint_yr is not None else "—",
+                    delta=f"{maint_pct_val:.1f}% of value/yr",
+                    delta_color="off",
+                    help=(
+                        f"Reserve set aside for repairs and upkeep. Calculated as "
+                        f"Current value × {maint_pct_val:.1f}%/yr. "
+                        f"Subtracted from cash flow even though you don't write a check for it each month — "
+                        f"it's an accrual against future maintenance. Adjust via maintenance_pct in portfolio.csv."
+                    ),
+                )
+                o5.metric(
+                    "Vacancy reserve",
+                    fmt_dollars(vac_yr) if vac_yr is not None else "—",
+                    delta=f"{vac_pct_val:.0f}% of rent",
+                    delta_color="off",
+                    help=(
+                        f"Reserve for expected unrented months. Calculated as "
+                        f"Annual rent × {vac_pct_val:.0f}%. "
+                        f"Currently {vac_pct_val:.0f}% — change via vacancy_pct in portfolio.csv "
+                        f"(typical assumption is 5–8% = ~half a month to a month per year)."
+                    ),
                 )
 
 st.divider()
