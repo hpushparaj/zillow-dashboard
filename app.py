@@ -99,6 +99,14 @@ total_monthly_rent = latest["actual_rent"].sum()
 total_annual_rent = total_monthly_rent * 12
 blended_yield = (total_annual_rent / total_value * 100) if total_value else 0
 
+def _escrow_is_in_mortgage(row) -> bool:
+    """Default True (most common); empty / missing treated as True."""
+    val = row.get("escrow_in_mortgage")
+    if pd.isna(val):
+        return True
+    return str(val).strip().lower() not in ("false", "no", "0", "f", "n")
+
+
 def per_property_cashflow(row):
     """Returns monthly cash flow for a row, or None if mortgage data is missing."""
     rent = row.get("actual_rent")
@@ -111,7 +119,13 @@ def per_property_cashflow(row):
     cur = row.get("zestimate") or 0
     maint = cur * maint_pct / 100 / 12
     vacancy_loss = rent * vac_pct / 100
-    return rent - pay - hoa - maint - vacancy_loss
+    # If escrow ISN'T in the mortgage payment, subtract tax + insurance separately
+    extra_tax_ins = 0
+    if not _escrow_is_in_mortgage(row):
+        tax = row.get("property_tax_annual") or 0
+        ins = row.get("insurance_annual") or 0
+        extra_tax_ins = (tax + ins) / 12
+    return rent - pay - hoa - maint - vacancy_loss - extra_tax_ins
 
 
 def per_property_noi(row):
@@ -345,14 +359,22 @@ for _, p in latest.iterrows():
             if pd.notna(m_balance) or pd.notna(m_payment):
                 st.markdown("**Financing**")
                 m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Equity", fmt_dollars(equity) if equity is not None else "—")
+                m1.metric(
+                    "Equity",
+                    fmt_dollars(equity) if equity is not None else "—",
+                    help=f"Current value − Mortgage balance of {fmt_dollars(m_balance)}." if pd.notna(m_balance) else "Current value − Mortgage balance.",
+                )
                 m2.metric("LTV", fmt_pct(ltv, sign=False) if ltv is not None else "—")
                 m3.metric(
                     "Mortgage payment",
                     f"{fmt_dollars(m_payment)}/mo" if pd.notna(m_payment) else "—",
-                    help=f"At {m_rate:.3f}% interest." if pd.notna(m_rate) else None,
+                    help="Monthly payment to lender (P&I + escrow if applicable).",
                 )
-                m4.metric("Mortgage balance", fmt_dollars(m_balance) if pd.notna(m_balance) else "—")
+                m4.metric(
+                    "Interest rate",
+                    f"{m_rate:.3f}%" if pd.notna(m_rate) else "—",
+                    help="Mortgage interest rate. Watch for ARM adjustment dates.",
+                )
 
                 if pd.notna(coc_return) or cash_invested is not None:
                     n1, n2, n3, n4 = st.columns(4)
